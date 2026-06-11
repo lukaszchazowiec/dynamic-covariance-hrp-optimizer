@@ -22,7 +22,7 @@ END_DATE = "2026-01-01"
 CACHE_PATH = "../data/prices.parquet"
 
 def fetch_prices(force_download=False):
-    # SPEED FIX: Use read_parquet (no parse_dates needed, data types are locked in)
+
     if os.path.exists(CACHE_PATH) and not force_download:
         print(f"Loading data from cache: {CACHE_PATH}")
         prices = pd.read_parquet(CACHE_PATH)

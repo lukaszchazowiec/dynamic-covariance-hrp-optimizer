@@ -7,16 +7,19 @@ from scipy.optimize import minimize
 
 def fit_univariate_garch(returns):
     std_resid_df = pd.DataFrame(index=returns.index)
+    vols_df = pd.DataFrame(index=returns.index)
 
     for asset in returns.columns:
         model = arch_model(returns[asset]*1000, p=1, q=1, dist='t')
         res = model.fit(disp="off")
 
         std_resid_df[asset] = pd.Series(res.std_resid, index=returns.index[-len(res.std_resid):])
+        vols_df[asset] = pd.Series(res.conditional_volatility / 1000, index=returns.index[-len(res.conditional_volatility):])
 
     std_resid_df = std_resid_df.dropna()
+    vols_df = vols_df.dropna()
 
-    return std_resid_df
+    return std_resid_df, vols_df
 
 
 
@@ -53,7 +56,7 @@ def fit_dcc(std_resid: np.ndarray) -> dict:
             return 1e10
 
         Q = Q_bar.copy()          # initialise Q at unconditional value
-        ll = 0.0
+        ll = 0.0                  # log-likelihood
 
         for t in range(T):
             e = std_resid[t]      # (N,) vector
@@ -116,7 +119,26 @@ def fit_dcc(std_resid: np.ndarray) -> dict:
     }
 
 
+def get_dynamic_covariance(vols_df, fit_dcc_results):
+    # dynamic_cor_matrix (sigma) = D * R * D
 
+    T, N = vols_df.shape
+    sigma_series = np.zeros((T, N, N))
+    vols_array = vols_df.values
+
+    for t in range(T):
+        R_t = fit_dcc_results['R'][t]
+        vols_t = vols_array[t]
+        D_t = np.diag(vols_t)
+
+        sigma_series[t] = D_t @ R_t @ D_t
+
+
+    return sigma_series
+
+
+
+"""
 if __name__ == "__main__":
     prices = fetch_prices()
     returns = compute_returns(prices)
@@ -125,3 +147,28 @@ if __name__ == "__main__":
     print(f"α={dcc_result['alpha']:.4f}  β={dcc_result['beta']:.4f}")
     print(f"α+β={dcc_result['alpha'] + dcc_result['beta']:.4f}  (must be <1)")
     print(f"R[0] diagonal: {np.diag(dcc_result['R'][0])}")  # should be all 1s
+ """
+
+if __name__ == "__main__":
+    from data_loader import fetch_prices, compute_returns
+
+    # Moduł 1: Pobieranie i zwroty
+    prices = fetch_prices()
+    returns = compute_returns(prices)
+
+    # Moduł 2, Krok 1: GARCH (wyciągamy rezidua I zmienności!)
+    print("Dopasowywanie modeli GARCH...")
+    std_resid, vols = fit_univariate_garch(returns)
+
+    # Moduł 2, Krok 2: DCC (karminy go reziduami w postaci tablicy NumPy)
+    print("Dopasowywanie modelu DCC...")
+    dcc_results = fit_dcc(std_resid.values)
+
+    # Moduł 2, Krok 3: Połączenie wszystkiego w Sigmę!
+    print("Obliczanie dynamicznej kowariancji...")
+    final_covariance = get_dynamic_covariance(vols, dcc_results)
+
+    # Szybki test poprawności:
+    print("\nSukces!")
+    print(f"Kształt końcowej tablicy kowariancji: {final_covariance.shape}")
+    # Powinno wypisać np. (3600, 16, 16) - czyli dla każdego dnia masz osobną macierz ryzyka!
