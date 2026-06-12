@@ -124,7 +124,7 @@ def get_dynamic_covariance(vols_df, fit_dcc_results):
 
     T, N = vols_df.shape
     sigma_series = np.zeros((T, N, N))
-    vols_array = vols_df.values
+    vols_array = vols_df.to_numpy()
 
     for t in range(T):
         R_t = fit_dcc_results['R'][t]
@@ -149,6 +149,21 @@ if __name__ == "__main__":
     print(f"R[0] diagonal: {np.diag(dcc_result['R'][0])}")  # should be all 1s
  """
 
+
+
+if __name__ == "__main__":
+    prices  = fetch_prices()
+    returns = compute_returns(prices)
+
+    Z, cond_vol = fit_univariate_garch(returns)
+    dcc_result = fit_dcc(Z.to_numpy())
+    Sigma = get_dynamic_covariance(cond_vol, dcc_result)
+
+    print(f"Sigma shape: {Sigma.shape}")
+    print(f"Sigma[0] diagonal: {np.diag(Sigma[0])}")
+    print(f"Sigma symmetric: {np.allclose(Sigma[0], Sigma[0].T)}")
+
+"""
 if __name__ == "__main__":
     from data_loader import fetch_prices, compute_returns
 
@@ -172,3 +187,4 @@ if __name__ == "__main__":
     print("\nSukces!")
     print(f"Kształt końcowej tablicy kowariancji: {final_covariance.shape}")
     # Powinno wypisać np. (3600, 16, 16) - czyli dla każdego dnia masz osobną macierz ryzyka!
+"""
