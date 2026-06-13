@@ -4,6 +4,7 @@ import matplotlib.dates as mdates
 import seaborn as sns
 
 from data_loader import fetch_prices, compute_returns
+from dcc_garch import fit_dcc, get_dynamic_covariance, fit_univariate_garch
 
 
 
@@ -42,6 +43,25 @@ def plot_rolling_correlation(returns, window=60):
     plt.show()
 
 
+def plot_dynamic_correlations(dcc_results, returns_df, asset_i, asset_j):
+
+    asset_i_idx = returns_df.columns.get_loc(asset_i)
+    asset_j_idx = returns_df.columns.get_loc(asset_j)
+
+    pairwise_corr = dcc_results['R'][:, asset_i_idx, asset_j_idx]
+
+    plt.figure(figsize=(12, 6))
+    plt.title(f"Dynamic correlations between {asset_i} and {asset_j}")
+    plt.xlabel("Time")
+    plt.ylabel("Correlation")
+    plt.grid(True, alpha=0.3)
+    plt.plot(returns_df.index, pairwise_corr, label="DCC-GARCH Correlation")
+    plt.axvspan('2020-02-15', '2020-04-30', color='red', alpha=0.15, label='COVID-19 Market Panic')
+
+    plt.legend(loc="lower left")
+
+    plt.show()
+
 # Quick check
 
 if __name__ == "__main__":
@@ -51,3 +71,9 @@ if __name__ == "__main__":
 
     plot_paired_correlation(returns)
     plot_rolling_correlation(returns)
+
+    std_resid, vols = fit_univariate_garch(returns)
+
+    dcc_results = fit_dcc(std_resid.values)
+
+    plot_dynamic_correlations(dcc_results, returns, 'SPY', 'TLT')
