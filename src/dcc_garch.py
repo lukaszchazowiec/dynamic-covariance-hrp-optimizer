@@ -10,11 +10,33 @@ def fit_univariate_garch(returns):
     vols_df = pd.DataFrame(index=returns.index)
 
     for asset in returns.columns:
-        model = arch_model(returns[asset]*1000, p=1, q=1, dist='t')
-        res = model.fit(disp="off")
+        y = returns[asset].dropna()
 
-        std_resid_df[asset] = pd.Series(res.std_resid, index=returns.index[-len(res.std_resid):])
-        vols_df[asset] = pd.Series(res.conditional_volatility / 1000, index=returns.index[-len(res.conditional_volatility):])
+        # 1. Sprawdzamy aktualną wariancję tego konkretnego aktywa w oknie
+        current_variance = np.var(y)
+
+        # 2. Automatycznie dobieramy mnożnik tak, aby wariancja była bliska 1.0
+        #    (Biblioteka arch kocha wariancję w tym przedziale)
+        if current_variance > 0:
+            rescale_factor = 1.0 / np.sqrt(current_variance)
+        else:
+            rescale_factor = 1.0
+
+        # Skalujemy dane wejściowe
+        y_scaled = y * rescale_factor
+
+        # 3. Dopasowujemy model na idealnie wyskalowanych danych
+        model = arch_model(y_scaled, p=1, q=1, dist='t')
+        # Wyłączamy pokazywanie ostrzeżeń, bo nasza skala jest już idealna
+        res = model.fit(disp="off", show_warning=False)
+
+        # 4. Wyciągamy wyniki i wracamy do oryginalnej skali backtestu
+        # Reszty standaryzowane (std_resid) są bezwymiarowe, więc skala sama się skraca
+        std_resid_df[asset] = pd.Series(res.std_resid, index=y.index)
+
+        # Wolatylność (vols) MUSI zostać podzielona przez nasz mnożnik,
+        # aby wróciła do oryginalnego rzędu wielkości w Twoim backteście!
+        vols_df[asset] = pd.Series(res.conditional_volatility / rescale_factor, index=y.index)
 
     std_resid_df = std_resid_df.dropna()
     vols_df = vols_df.dropna()
@@ -90,7 +112,7 @@ def fit_dcc(std_resid: np.ndarray) -> dict:
         _dcc_loglik,
         x0=[0.05, 0.90],           # sensible starting point
         method='Nelder-Mead',
-        options={'maxiter': 2000, 'xatol': 1e-6, 'fatol': 1e-6}
+        options={'maxiter': 500, 'maxfev': 500, 'xatol': 1e-4, 'fatol': 1e-4}
     )
 
     alpha_hat, beta_hat = result.x

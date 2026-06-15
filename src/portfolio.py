@@ -124,10 +124,119 @@ def hrp_weights(cov_matrix):
     return weights.sort_index().values, linkage_matrix
 
 
+#=====================================================
+# BENCHMARKS
+
+
+# Benchmark 1: EQUAL-WEIGHTS PORTFOLIO
+
+def benchmark_equal_weights(cov_matrix):
+    N = cov_matrix.shape[-1] # not using len(), because if we have 3D cov_matrix, we want to use the last dimension
+    weights = np.ones(N) / N
+
+    return weights
+
+
+# Benchmark 2: STATIC HRP PORTFOLIO
+
+def benchmark_static_hrp(returns):
+    from sklearn.covariance import LedoitWolf
+    from sklearn.covariance import LedoitWolf
+
+    lw = LedoitWolf()
+    lw.fit(returns)
+    shrunk_cov = lw.covariance_
+
+    weights, _ = hrp_weights(shrunk_cov)
+    return weights
+
+
+# Benchmark 3: MINIMUM-VARIANCE PORTFOLIO
+
+def benchmark_min_variance(cov_matrix):
+    import scipy.optimize as sco
+    cov_matrix = np.asarray(cov_matrix)
+
+    # --- BEZPIECZNIK 3D ---
+    if cov_matrix.ndim == 3:
+        cov_matrix = cov_matrix[-1]
+    # ----------------------
+
+    N = cov_matrix.shape[-1]
+
+    # min(wT * Cov * w)
+
+    function = lambda w, c: np.dot(w.T, np.dot(c, w))
+
+    x0 = np.zeros(N)
+    x0[0] = 1.0  # Cały kapitał na starcie w AGG
+    x0 = benchmark_equal_weights(cov_matrix)
+
+    constraints = {
+        'type': 'eq',
+        'fun': lambda w: np.sum(w) - 1.0,
+    }
+
+    bounds = [(0.0, 1.0) for _ in range(N)]
+
+    res = sco.minimize(function, x0, args=(cov_matrix,), method='SLSQP',
+                       constraints=constraints, bounds=bounds,
+                       options={'ftol': 1e-9, 'maxiter': 1000})
+
+    return res.x[:N]
+
 
 
 # Quick check
 
+
+if __name__ == "__main__":
+    prices = fetch_prices()
+    returns = compute_returns(prices)
+
+    std_resid, vols = fit_univariate_garch(returns)
+    dcc_results = fit_dcc(std_resid.values)
+    cov_history_3D = get_dynamic_covariance(vols, dcc_results)
+
+    last_day_cov = cov_history_3D[-1]
+
+    print("Obliczam wagi portfela HRP (DCC-GARCH)...")
+    w_hrp, _ = hrp_weights(last_day_cov)
+
+    print("Obliczam wagi portfela Equal-Weight...")
+    w_ew = benchmark_equal_weights(last_day_cov)
+
+    print("Obliczam wagi portfela Static HRP (Ledoit-Wolf)...")
+    w_static = benchmark_static_hrp(returns)
+
+    print("Obliczam wagi portfela Minimum-Variance (Markowitz)...")
+    w_min_var = benchmark_min_variance(last_day_cov)
+
+    # 5. Tworzenie czytelnej tabeli porównawczej w Pandas
+    comparison_df = pd.DataFrame({
+        'HRP (DCC)': w_hrp * 100,
+        'Equal-Weight': w_ew * 100,
+        'Static HRP (LW)': w_static * 100,
+        'Min-Variance': w_min_var * 100
+    }, index=returns.columns)
+
+    # 6. Wyświetlanie wyników w konsoli
+    print("\n" + "=" * 65)
+    print("         PORÓWNANIE WAG PORTFELI W PROCENTACH (%)")
+    print("=" * 65)
+    print(comparison_df.round(2).to_string())
+    print("=" * 65)
+
+    # 7. Szybki test sumowania (Kontrola jakości: każda kolumna musi dać 100%)
+    print("\nKontrola sumowania kapitału (czy każdy model ulokował 100%?):")
+    print(f"  HRP (DCC):      {w_hrp.sum() * 100:.2f}%")
+    print(f"  Equal-Weight:   {w_ew.sum() * 100:.2f}%")
+    print(f"  Static HRP:     {w_static.sum() * 100:.2f}%")
+    print(f"  Min-Variance:   {w_min_var.sum() * 100:.2f}%")
+    print("=" * 65)
+
+
+"""
 if __name__ == "__main__":
     prices = fetch_prices()
     returns = compute_returns(prices)
@@ -162,3 +271,4 @@ if __name__ == "__main__":
     for idx, weight in enumerate(final_weights):
         print(f"  Aktywo nr {idx:2d}: {weight * 100:6.2f}%")
     print("=" * 50)
+"""
