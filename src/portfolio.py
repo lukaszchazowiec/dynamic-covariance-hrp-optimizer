@@ -121,11 +121,10 @@ def hrp_weights(cov_matrix):
         clusters_queue.append(left_cluster)
         clusters_queue.append(right_cluster)
 
-    return weights.sort_index().values
+    return weights.sort_index().values, linkage_matrix
 
 
 
-# Quick check
 
 # Quick check
 
