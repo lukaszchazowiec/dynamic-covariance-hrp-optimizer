@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 import scipy.stats as stats
 
-# Define your 16 ETF universe exactly as planned
+# 16 ETF's from different sectors
 ETF_UNIVERSE = [
     # US Equities - Broad
     "SPY", "QQQ", "IWM",
@@ -17,7 +17,7 @@ ETF_UNIVERSE = [
 ]
 
 TICKERS = ETF_UNIVERSE
-START_DATE = "2011-10-10" # SVXY started didnt exist before 2011
+START_DATE = "2011-10-10" # SVXY didn't exist before 2011
 END_DATE = "2026-01-01"
 CACHE_PATH = "../data/prices.parquet"
 
@@ -63,6 +63,7 @@ def describe_returns(returns):
     print(pct_high_kurtosis, "% of returns are highly kurtosic")
 
 
+# Jarque-Bera test for normality
 def jarque_bera(returns):
     print("=== JB Test Summary ===")
     jb_results = []
@@ -89,20 +90,5 @@ if __name__ == "__main__":
     describe_returns(returns)
     print()
     jarque_bera(returns)
-
-
-
-
-"""
-if __name__ == "__main__":
-    df = fetch_prices()
-    returns = compute_returns(df)
-
-    print("=== returns preview ===")
-    print("\nfirst 5 rows:")
-    print(returns.head())
-    print("\nlast 5 rows:")
-    print(returns.tail())
-"""
 
 
