@@ -59,7 +59,7 @@ def describe_returns(returns):
 
     print(summary.T)
     print(pct_high_skew, "% of returns are highly skewed")
-    print(pct_high_kurtosis, "% of returns are highly kurtosic")
+    print(pct_high_kurtosis, "% of rs are highly kurtosic")
 
 
 # Jarque-Bera test for normality
