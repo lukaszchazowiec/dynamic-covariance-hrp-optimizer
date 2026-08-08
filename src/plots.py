@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
@@ -7,7 +8,7 @@ import scipy.cluster.hierarchy as sch
 from data_loader import fetch_prices, compute_returns
 from dcc_garch import fit_dcc, get_dynamic_covariance, fit_univariate_garch
 from portfolio import hrp_weights
-
+from backtest import rolling_backtest
 
 def plot_paired_correlation(returns):
     plt.close("all")
@@ -18,24 +19,23 @@ def plot_paired_correlation(returns):
     plt.tight_layout()
     plt.show()
 
-
 def plot_rolling_correlation(returns, window=60):
     plt.close("all")
     avg_corr = []
+    dates = []
 
     for i in range(window, len(returns)):
         corr_matrix = returns.iloc[i-window:i].corr()
-
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
         avg_corr.append(upper.stack().mean())
-
+        dates.append(returns.index[i])   # <- zbieramy prawdziwą datę dla tego punktu
 
     plt.figure(figsize=(12, 6))
     plt.title("Rolling average correlation between stock returns")
     plt.xlabel("Time")
     plt.ylabel("Correlation")
     plt.grid(True)
-    plt.plot(avg_corr)
+    plt.plot(dates, avg_corr)   # <- teraz oś X ma prawdziwe daty
 
     ax = plt.gca()
     ax.xaxis.set_major_locator(mdates.YearLocator())
@@ -78,9 +78,6 @@ def plot_dendogram(linkage_matrix, asset_names=None):
     sch.dendrogram(linkage_matrix, labels=asset_names, orientation="top", leaf_rotation=45, leaf_font_size=8)
 
     plt.show()
-
-
-
 
 # Quick check
 

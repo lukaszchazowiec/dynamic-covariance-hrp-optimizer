@@ -83,13 +83,14 @@ def rolling_backtest(window_size=252, rebal_freq=21):
 
 
 if __name__ == "__main__":
+    window_size = 252
     # 1. Odpalamy zmodyfikowany backtest i odbieramy komplet 5 wyników
     hrp, ew, static, min_var, hrp_weights_hist = rolling_backtest()
 
     # 2. Dopasowujemy daty (odcinamy pierwsze 252 dni stanowiące pierwsze okno treningowe)
     prices = fetch_prices()
     returns = compute_returns(prices)
-    backtest_dates = returns.index[252:]
+    backtest_dates = returns.index[window_size:]
     asset_names = returns.columns
 
     # 3. Tworzymy tabelę zbiorczą stóp zwrotu (DataFrame)

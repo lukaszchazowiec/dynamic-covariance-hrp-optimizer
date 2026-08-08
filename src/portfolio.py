@@ -121,6 +121,7 @@ def hrp_weights(cov_matrix):
         clusters_queue.append(left_cluster)
         clusters_queue.append(right_cluster)
 
+    assert np.isclose(weights.sum(), 1.0)
     return weights.sort_index().values, linkage_matrix
 
 
@@ -140,7 +141,6 @@ def benchmark_equal_weights(cov_matrix):
 # Benchmark 2: STATIC HRP PORTFOLIO
 
 def benchmark_static_hrp(returns):
-    from sklearn.covariance import LedoitWolf
     from sklearn.covariance import LedoitWolf
 
     lw = LedoitWolf()
@@ -168,8 +168,6 @@ def benchmark_min_variance(cov_matrix):
 
     function = lambda w, c: np.dot(w.T, np.dot(c, w))
 
-    x0 = np.zeros(N)
-    x0[0] = 1.0  # Cały kapitał na starcie w AGG
     x0 = benchmark_equal_weights(cov_matrix)
 
     constraints = {

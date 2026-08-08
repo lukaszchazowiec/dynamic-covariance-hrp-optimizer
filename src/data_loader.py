@@ -54,10 +54,9 @@ def describe_returns(returns):
     skewness = returns.skew()
     kurtosis = returns.kurtosis()
 
-    pct_high_skew = (skewness.abs() > 0.5).mean() * 100
-    pct_high_kurtosis = (kurtosis.abs() > 0).mean() * 100   # normal_kurtosis == 0
+    pct_high_skew = (skewness.abs() > 1).mean() * 100
+    pct_high_kurtosis = (kurtosis.abs() > 1).mean() * 100   # normal_kurtosis == 0
 
-    skew_kurt = pd.DataFrame([skewness, kurtosis], index=["skewness", "kurtosis"])
     print(summary.T)
     print(pct_high_skew, "% of returns are highly skewed")
     print(pct_high_kurtosis, "% of returns are highly kurtosic")
@@ -71,7 +70,6 @@ def jarque_bera(returns):
     for asset in returns.columns:
         jb_stat, jb_p = stats.jarque_bera(returns[asset])
         jb_results.append(jb_p)
-
 
     jb_series = pd.Series(jb_results, index=returns.columns)
     pct_rejected = (jb_series < 0.05).mean() * 100

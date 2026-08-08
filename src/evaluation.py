@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
-#plt.style.use('whitegrid')
 
 import yfinance as yf
 
@@ -56,7 +55,7 @@ def metrics_table(results_df, rf_series):
 
         metrics[col] = {
             'Total Return': total_return,
-            'CAGR (Ann Return': annualized_return,
+            'CAGR (Ann Return)': annualized_return,
             'Annualized Volatility': annualized_vol,
             'Sharpe Ratio': s_ratio,
             'Max Drawdown': m_dd,
@@ -75,7 +74,7 @@ if __name__ == "__main__":
     # 2. Szybkie pobranie i dopasowanie T-Bills
     print("Pobieram stopy wolne od ryzyka...")
     tbills = yf.download("^IRX", start=results_df.index[0], end=results_df.index[-1])['Close'].squeeze()
-    rf_series = tbills.reindex(results_df.index, method='ffill').bfill().ffill() / 100.0
+    rf_series = tbills.reindex(results_df.index).ffill().bfill() / 100.0
 
     # 3. Obliczenie i wyświetlenie tabeli metryk
     summary_df = metrics_table(results_df, rf_series)
