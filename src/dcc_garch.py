@@ -37,6 +37,31 @@ def fit_univariate_garch(returns):
 
     return std_resid_df, vols_df
 
+def compute_R_series(std_resid: np.ndarray, Q_bar: np.ndarray, alpha: float, beta: float) -> np.ndarray:
+    """
+    Przelicza szereg czasowy macierzy korelacji R_t dla podanych (już ustalonych)
+    parametrów alpha, beta. Wydzielone z fit_dcc, żeby dało się przeliczyć R_t
+    także dla parametrów innych niż te znalezione przez optymalizator
+    (np. przy fallbacku na parametry z poprzedniego okna w backteście).
+    """
+    T, N = std_resid.shape
+    R_series = np.zeros((T, N, N))
+    Q = Q_bar.copy()
+
+    for t in range(T):
+        e = std_resid[t]
+        d = np.sqrt(np.diag(Q))
+        R = Q / np.outer(d, d)
+        np.clip(R, -0.9999, 0.9999, out=R)
+        np.fill_diagonal(R, 1.0)
+
+        R_series[t] = R
+
+        Q = (1 - alpha - beta) * Q_bar \
+            + alpha * np.outer(e, e) \
+            + beta * Q
+
+    return R_series
 
 def fit_dcc(std_resid: np.ndarray) -> dict:
     """
@@ -56,15 +81,14 @@ def fit_dcc(std_resid: np.ndarray) -> dict:
         'Q_bar'  : macierz bezwarunkowej kowariancji reszt ustandaryzowanych (punkt kotwiczenia)
         'R'      : szereg czasowy macierzy korelacji warunkowych o wymiarze (T, N, N)
         'loglik' : maksymalizowana wartość funkcji log-wiarygodności (Log-Likelihood)
+        'success': czy optymalizacja się zbiegła (bool)
+        'n_restarts_tried': ile punktów startowych zostało wypróbowanych
     """
     T, N = std_resid.shape
 
     # =========================================================================
     # KROK 1: Obliczenie macierzy kotwiczącej Q_bar (Długoterminowa kowariancja)
     # =========================================================================
-    # Q_bar reprezentuje długoterminową średnią macierz pseudokowariancji reszt.
-    # W warunkach spokoju rynkowego korelacje powracają do tej wartości (mean-reversion).
-    # Iloczyn (N, T) @ (T, N) z podziałem przez T daje estymator bezwarunkowej macierzy (N, N).
     Q_bar = std_resid.T @ std_resid / T  # Kształt: (N, N)
 
     # =========================================================================
@@ -73,109 +97,104 @@ def fit_dcc(std_resid: np.ndarray) -> dict:
     def _dcc_loglik(params):
         alpha, beta = params
 
-        # DECYZJA 1: Warunek stacjonarności i dodatniej określoności.
-        # W finansach suma alpha + beta MUSI być mniejsza od 1, aby proces nie eksplodował.
-        # Parametry muszą być dodatnie. Jeśli optimizer przetestuje zabroniony obszar,
-        # zwracamy sztucznie dużą karę (1e10), zmuszając go do wycofania się.
         if alpha <= 0 or beta <= 0 or alpha + beta >= 1:
             return 1e10
 
-        Q = Q_bar.copy()  # Inicjalizacja macierzy Q_0 wartością bezwarunkową Q_bar
-        ll = 0.0  # Zmienna kumulująca wartość funkcji log-wiarygodności
+        Q = Q_bar.copy()
+        ll = 0.0
 
-        # Pętla krocząca po historii giełdowej (dzień po dniu)
         for t in range(T):
-            e = std_resid[t]  # Wektor ustandaryzowanych reszt w dniu t (wymiar N,)
+            e = std_resid[t]
 
-            # DECYZJA 2: Przekształcenie pseudokowariancji Q_t w czystą macierz korelacji R_t.
-            # Ponieważ elementy na przekątnej Q_t nie są idealnie równe 1.0, skalujemy Q_t
-            # przez iloczyn odchyleń standardowych z jej diagonali: R = Q / (d * d^T).
-            d = np.sqrt(np.diag(Q))  # Odchylenia standardowe (wymiar N,)
-            R = Q / np.outer(d, d)  # Skalowanie macierzowe -> macierz korelacji (N, N)
+            d = np.sqrt(np.diag(Q))
+            R = Q / np.outer(d, d)
 
-            # DECYZJA 3: Zabezpieczenie numeryczne przed osobliwością (Invertibility).
-            # Zapobiegamy sytuacji, w której korelacja osiagnie dokładnie 1.0 lub -1.0,
-            # co uniemożliwiłoby odwrócenie macierzy R (awaria linalg.inv).
             np.clip(R, -0.9999, 0.9999, out=R)
-            np.fill_diagonal(R, 1.0)  # Gwarancja idealnych jedynek na przekątnej
+            np.fill_diagonal(R, 1.0)
 
-            # DECYZJA 4: Liczenie wyznacznika odporne na błędy precyzji (Underflow).
-            # Wyznacznik macierzy korelacji bywa bliski 0. Metoda slogdet wyciąga od razu
-            # logarytm wyznacznika (log_det), unikając błędów zaokrągleń float64.
-            sign, log_det = np.linalg.slogdet(R)
-            if sign <= 0:  # Macierz MUSI być dodatnio określona
+            try:
+                sign, log_det = np.linalg.slogdet(R)
+                if sign <= 0:
+                    return 1e10
+                R_inv = np.linalg.inv(R)
+            except np.linalg.LinAlgError:
+                # Macierz osobliwa / nieodwracalna -> kara zamiast crasha
                 return 1e10
 
-            # DECYZJA 5: Obliczenie dziennego wkładu do Log-Likelihood.
-            # Wzór: -0.5 * [ ln|R_t| + e_t^T * R_t^{-1} * e_t - e_t^T * e_t ]
-            # Wyrażenie (e @ R_inv @ e) to odległość Mahalanobisa — kara za błąd prognozy korelacji.
-            # Człon (e @ e) to stała normalizująca względem modelu bazowego (IID).
-            # Odejmujemy ten wkład, budując łączną wartość log-wiarygodności.
-            R_inv = np.linalg.inv(R)
             ll -= 0.5 * (log_det + e @ R_inv @ e - e @ e)
 
-            # DECYZJA 6: Aktualizacja rekurencyjna Q_t na kolejny dzień (DCC Recursion).
-            # Nowa wartość Q to ważona kombinacja trzech elementów:
-            # 1. Średniej długoterminowej: (1 - alpha - beta) * Q_bar
-            # 2. Wczorajszego szoku rynkowego: alpha * (e * e^T) [iloczyn zewnętrzny]
-            # 3. Pamięci z poprzedniego dnia: beta * Q_{t-1}
             Q = (1 - alpha - beta) * Q_bar \
                 + alpha * np.outer(e, e) \
                 + beta * Q
 
-        # DECYZJA 7: Zmiana znaku (Konwersja problemu).
-        # Chcemy MAKSYMALIZOWAĆ wiarygodność (ll). Ponieważ scipy.optimize.minimize
-        # potrafi wyłącznie MINIMALIZOWAĆ funkcje, zwracamy ujemne Log-Likelihood (-ll).
+        if not np.isfinite(ll):
+            return 1e10
+
         return -ll
 
-        # =========================================================================
-
-    # KROK 3: Numeryczna optymalizacja parametrów (alpha, beta)
     # =========================================================================
-    # DECYZJA 8: Wybór algorytmu Nelder-Mead i punktu startowego.
-    # Metoda Nelder-Mead jest bezgradientowa i bardzo stabilna dla problemów z ograniczeniami.
-    # Punkt x0=[0.05, 0.90] reprezentuje typowe stany rynkowe (mały szok, wysoka pamięć).
-    result = minimize(
-        _dcc_loglik,
-        x0=[0.05, 0.90],
-        method='Nelder-Mead',
-        options={'maxiter': 500, 'maxfev': 500, 'xatol': 1e-4, 'fatol': 1e-4}
-    )
+    # KROK 3: Numeryczna optymalizacja z wieloma punktami startowymi (multi-start)
+    # =========================================================================
+    # DECYZJA: Nelder-Mead bywa niestabilny i potrafi utknąć w złym rozwiązaniu
+    # zależnie od punktu startowego. Próbujemy kilku różnych punktów startowych
+    # i wybieramy ten, który dał najniższą wartość funkcji celu (najlepsze dopasowanie).
+    starting_points = [
+        [0.05, 0.90],
+        [0.01, 0.95],
+        [0.10, 0.80],
+        [0.03, 0.70],
+        [0.15, 0.60],
+    ]
 
-    if not result.success:
-        print("Uwaga: optymalizacja DCC się nie zbiegła:", result.message)
+    best_result = None
 
-    alpha_hat, beta_hat = result.x
+    for x0 in starting_points:
+        result = minimize(
+            _dcc_loglik,
+            x0=x0,
+            method='Nelder-Mead',
+            options={'maxiter': 500, 'maxfev': 500, 'xatol': 1e-4, 'fatol': 1e-4}
+        )
+
+        # Odrzucamy wyniki, które utknęły w obszarze kary (brak sensownego dopasowania)
+        if not np.isfinite(result.fun) or result.fun >= 1e9:
+            continue
+
+        if best_result is None or result.fun < best_result.fun:
+            best_result = result
+
+    # Jeśli WSZYSTKIE starty zawiodły, spróbujmy jeszcze raz z domyślnym punktem
+    # i przyjmijmy go jako wynik z jawnym oznaczeniem niepowodzenia, zamiast
+    # ciszej awarii.
+    if best_result is None:
+        best_result = minimize(
+            _dcc_loglik,
+            x0=[0.05, 0.90],
+            method='Nelder-Mead',
+            options={'maxiter': 1000, 'maxfev': 1000, 'xatol': 1e-4, 'fatol': 1e-4}
+        )
+
+    alpha_hat, beta_hat = best_result.x
+    converged = bool(best_result.success) and (best_result.fun < 1e9)
+
+    if not converged:
+        print(f"Warning: DCC optimization did not converge cleanly. "
+              f"alpha={alpha_hat:.4f}, beta={beta_hat:.4f}, "
+              f"message={getattr(best_result, 'message', 'n/a')}")
 
     # =========================================================================
-    # KROK 4: Odtworzenie pełnego szeregu czasowego macierzy R_t dla zoptymalizowanych parametrów
+    # KROK 4: Odtworzenie pełnego szeregu czasowego macierzy R_t
     # =========================================================================
-    # Mając już optymalne parametry (alpha_hat, beta_hat), przechodzimy po pętli po raz ostatni,
-    # aby zapisać i zwrócić macierze R_t dla każdego dnia. Te macierze zasilą bezpośrednio HRP.
-    R_series = np.zeros((T, N, N))
-    Q = Q_bar.copy()
+    R_series = compute_R_series(std_resid, Q_bar, alpha_hat, beta_hat)
 
-    for t in range(T):
-        e = std_resid[t]
-        d = np.sqrt(np.diag(Q))
-        R = Q / np.outer(d, d)
-        np.clip(R, -0.9999, 0.9999, out=R)
-        np.fill_diagonal(R, 1.0)
-
-        R_series[t] = R  # Zapisujemy wyliczoną macierz korelacji dla dnia t
-
-        Q = (1 - alpha_hat - beta_hat) * Q_bar \
-            + alpha_hat * np.outer(e, e) \
-            + beta_hat * Q
-
-    # Zwracamy slownik ze wszystkimi wynikami.
-    # Odwracamy znak result.fun (-result.fun), aby przywrócić pierwotną, dodatnią/prawdziwą wartość Log-Likelihood.
     return {
         'alpha': alpha_hat,
         'beta': beta_hat,
         'Q_bar': Q_bar,
         'R': R_series,
-        'loglik': -result.fun,
+        'loglik': -best_result.fun,
+        'success': converged,
+        'n_restarts_tried': len(starting_points),
     }
 
 
